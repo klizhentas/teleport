@@ -179,6 +179,16 @@ func (a *AuthMiddleware) GetUser(r *http.Request) (interface{}, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+	// If there is any restriction on the certificate usage
+	// reject the API server request. This is done so some classes
+	// of certificates issued for kubernetes usage by proxy, can not be used
+	// against auth server. Later on we can extend more
+	// advanced cert usage, but for now this is the safest option.
+	if len(identity.Usage) != 0 {
+		log.Warning("Restricted certificate %v with usage %v rejected while accessing the auth endpoint.", identity.Username, identity.Usage)
+		return nil, trace.AccessDenied("access denied: invalid client certificate")
+	}
+
 	// this block assumes interactive user from remote cluster
 	// based on the remote certificate authority cluster name encoded in
 	// x509 organization name. This is a safe check because:

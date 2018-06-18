@@ -394,4 +394,8 @@ const (
 
 	// KubeSystemMasters is a name of the builtin kubernets group for master nodes
 	KubeSystemMasters = "system:masters"
+
+	// UsageKubeOnly specifies certificate usage metadata
+	// that limits certificate to be only used for kubernetes proxying
+	UsageKubeOnly = "usage:kube"
 )

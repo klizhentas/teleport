@@ -25,6 +25,7 @@ package auth
 
 import (
 	"context"
+	"crypto"
 	"crypto/x509"
 	"fmt"
 	"math/rand"
@@ -279,14 +280,19 @@ type certRequest struct {
 	roles services.AccessChecker
 	// ttl is Duration of the certificate
 	ttl time.Duration
-	// publicKey is RSA public key in authorized_keys format
+	// publicKey is RSA public key in authorized_keys format,
+	// used if pubicKeyParsed is not specified
 	publicKey []byte
+	// publicKey is RSA public key, publicKeyBytes is used instead
+	publicKeyParsed crypto.PublicKey
 	// compatibility is compatibility mode
 	compatibility string
 	// overrideRoleTTL is used for requests when the requested TTL should not be
 	// adjusted based off the role of the user. This is used by tctl to allow
 	// creating long lived user certs.
 	overrideRoleTTL bool
+	// usage is a list of metdata restrictions and allowed encoded in X509x certificate
+	usage []string
 }
 
 // GenerateUserCerts is used to generate user certificate, used internally for tests
@@ -314,10 +320,14 @@ func (a *AuthServer) GenerateUserCerts(key []byte, username string, ttl time.Dur
 
 // generateUserCert generates user certificates
 func (s *AuthServer) generateUserCert(req certRequest) (*certs, error) {
-	// reuse the same RSA keys for SSH and TLS keys
-	cryptoPubKey, err := sshutils.CryptoPublicKey(req.publicKey)
-	if err != nil {
-		return nil, trace.Wrap(err)
+	cryptoPubKey := req.publicKeyParsed
+	if cryptoPubKey == nil {
+		var err error
+		// reuse the same RSA keys for SSH and TLS keys
+		cryptoPubKey, err = sshutils.CryptoPublicKey(req.publicKey)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
 	}
 
 	// extract the passed in certificate format. if nothing was passed in, fetch
@@ -407,6 +417,7 @@ func (s *AuthServer) generateUserCert(req certRequest) (*certs, error) {
 	identity := tlsca.Identity{
 		Username: req.user.GetName(),
 		Groups:   req.roles.RoleNames(),
+		Usage:    req.usage,
 	}
 	certRequest := tlsca.CertificateRequest{
 		Clock:     s.clock,

@@ -161,22 +161,26 @@ type authContext struct {
 }
 
 func (c authContext) String() string {
-	return fmt.Sprintf("user: %v, groups: %v, cluster: %v", c.User.GetName(), c.kubeGroups, c.cluster.name)
+	return fmt.Sprintf("user: %v, groups: %v, cluster: %v", c.User.GetName(), c.kubeGroups, c.cluster.GetName())
 }
 
 func (c *authContext) key() string {
-	return fmt.Sprintf("%v:%v:%v", c.cluster.name, c.User.GetName(), c.kubeGroups)
+	return fmt.Sprintf("%v:%v:%v", c.cluster.GetName(), c.User.GetName(), c.kubeGroups)
 }
 
 // cluster represents cluster information, name of the cluster
 // target address and custom dialer
 type cluster struct {
-	name       string
+	reversetunnel.RemoteSite
 	targetAddr string
 }
 
 func (c *cluster) Dial(_, _ string) (net.Conn, error) {
-	conn, err := net.Dial("tcp", c.targetAddr)
+	conn, err := c.RemoteSite.Dial(
+		// TODO: klizhentas sort out local addr?
+		&utils.NetAddr{AddrNetwork: "tcp", Addr: "127.0.0.1:0"},
+		&utils.NetAddr{AddrNetwork: "tcp", Addr: c.targetAddr},
+		nil)
 	return conn, err
 }
 
@@ -190,10 +194,13 @@ type handlerWithAuthFuncStd func(ctx *authContext, w http.ResponseWriter, r *htt
 func (f *Forwarder) authenticate(req *http.Request) (*authContext, error) {
 	const accessDeniedMsg = "[00] access denied"
 
+	var isRemoteUser bool
 	userTypeI := req.Context().Value(auth.ContextUser)
 	switch userTypeI.(type) {
-	// limit access to local users only, later add remote user
 	case auth.LocalUser:
+
+	case auth.RemoteUser:
+		isRemoteUser = true
 	default:
 		f.Warningf("Denying proxy access to unsupported user type: %T.", userTypeI)
 		return nil, trace.AccessDenied(accessDeniedMsg)
@@ -215,7 +222,7 @@ func (f *Forwarder) authenticate(req *http.Request) (*authContext, error) {
 			return nil, trace.AccessDenied(accessDeniedMsg)
 		}
 	}
-	authContext, err := f.setupContext(*userContext)
+	authContext, err := f.setupContext(*userContext, req.Host, isRemoteUser)
 	if err != nil {
 		f.Warn(trace.DebugReport(err))
 		return nil, trace.AccessDenied(accessDeniedMsg)
@@ -243,7 +250,7 @@ func (f *Forwarder) withAuth(handler handlerWithAuthFunc) httprouter.Handle {
 	})
 }
 
-func (f *Forwarder) setupContext(ctx auth.AuthContext) (*authContext, error) {
+func (f *Forwarder) setupContext(ctx auth.AuthContext, targetHost string, isRemoteUser bool) (*authContext, error) {
 	roles, err := services.FetchRoles(ctx.User.GetRoles(), f.Client, ctx.User.GetTraits())
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -259,13 +266,26 @@ func (f *Forwarder) setupContext(ctx auth.AuthContext) (*authContext, error) {
 		return nil, trace.Wrap(err)
 	}
 
+	targetCluster, err := f.Tunnel.GetSite(f.ClusterName)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	for _, remoteCluster := range f.Tunnel.GetSites() {
+		if strings.HasSuffix(targetHost, remoteCluster.GetName()+".") {
+			f.Debugf("Going to proxy to cluster: %v based on matching host suffix %v.", remoteCluster.GetName(), targetHost)
+			targetCluster = remoteCluster
+			break
+		}
+	}
+	if targetCluster.GetName() != f.ClusterName && isRemoteUser {
+		return nil, trace.AccessDenied("access denied: remote user can not access remote cluster")
+	}
 	return &authContext{
 		sessionTTL:  sessionTTL,
 		AuthContext: ctx,
 		kubeGroups:  kubeGroups,
-		// TODO: derive cluster name and target addr from the target host name
 		cluster: cluster{
-			name:       f.ClusterName,
+			RemoteSite: targetCluster,
 			targetAddr: f.TargetAddr,
 		},
 	}, nil
@@ -636,7 +656,9 @@ func (f *Forwarder) requestCertificate(ctx authContext) (*bundle, error) {
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
 
 	response, err := f.Client.ProcessKubeCSR(auth.KubeCSR{
-		CSR: csrPEM,
+		Username:    ctx.user.GetName(),
+		ClusterName: ctx.cluster.GetName(),
+		CSR:         csrPEM,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
