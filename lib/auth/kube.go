@@ -48,8 +48,8 @@ func (a *KubeCSR) CheckAndSetDefaults() error {
 type KubeCSRResponse struct {
 	// Cert is a signed certificate PEM block
 	Cert []byte `json:"cert"`
-	// CAS is a list of PEM block with trusted cert authorities
-	CAS [][]byte `json:"cas"`
+	// CertAuthorities is a list of PEM block with trusted cert authorities
+	CertAuthorities [][]byte `json:"cert_authorities"`
 }
 
 // ProcessKubeCSR processes CSR request against Kubernetes CA, returns
@@ -66,7 +66,7 @@ func (s *AuthServer) ProcessKubeCSR(req KubeCSR) (*KubeCSRResponse, error) {
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		return &KubeCSRResponse{Cert: cert.Cert, CAS: [][]byte{cert.CA}}, nil
+		return &KubeCSRResponse{Cert: cert.Cert, CertAuthorities: [][]byte{cert.CA}}, nil
 	}
 	// Certificate for remote cluster is a user certificate
 	// with special provisions.
@@ -113,5 +113,9 @@ func (s *AuthServer) ProcessKubeCSR(req KubeCSR) (*KubeCSRResponse, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return &KubeCSRResponse{Cert: certs.tls, CA: hostCA}, nil
+	re := &KubeCSRResponse{Cert: certs.tls}
+	for _, keyPair := range hostCA.GetTLSKeyPairs() {
+		re.CertAuthorities = append(re.CertAuthorities, keyPair.Cert)
+	}
+	return re, nil
 }
