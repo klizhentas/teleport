@@ -79,6 +79,10 @@ type AgentPoolConfig struct {
 	// Clock is a clock used to get time, if not set,
 	// system clock is used
 	Clock clockwork.Clock
+	// KubeListener is an address of a kubernetes listener
+	// used for efficient passthrough of connections,
+	// can be nil if no kubernetes is set up
+	KubeListener *utils.FanInListener
 }
 
 // CheckAndSetDefaults checks and sets defaults
@@ -307,6 +311,7 @@ func (m *AgentPool) addAgent(key agentKey, discoverProxies []services.Server) er
 		Context:         m.ctx,
 		DiscoveryC:      m.discoveryC,
 		DiscoverProxies: discoverProxies,
+		KubeListener:    m.cfg.KubeListener,
 	})
 	if err != nil {
 		return trace.Wrap(err)

@@ -1446,7 +1446,7 @@ type proxyListeners struct {
 	mux           *multiplexer.Mux
 	web           net.Listener
 	reverseTunnel net.Listener
-	kube          net.Listener
+	kube          *utils.FanInListener
 }
 
 func (l *proxyListeners) Close() {
@@ -1477,7 +1477,7 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		listeners.kube = listener
+		listeners.kube = utils.NewFanInListener(listener)
 	}
 
 	switch {
@@ -1585,11 +1585,12 @@ func (process *TeleportProcess) initProxyEndpoint(conn *Connector) error {
 
 	// Register reverse tunnel agents pool
 	agentPool, err := reversetunnel.NewAgentPool(reversetunnel.AgentPoolConfig{
-		HostUUID:    conn.ServerIdentity.ID.HostUUID,
-		Client:      conn.Client,
-		AccessPoint: accessPoint,
-		HostSigners: []ssh.Signer{conn.ServerIdentity.KeySigner},
-		Cluster:     conn.ServerIdentity.Cert.Extensions[utils.CertExtensionAuthority],
+		HostUUID:     conn.ServerIdentity.ID.HostUUID,
+		Client:       conn.Client,
+		AccessPoint:  accessPoint,
+		HostSigners:  []ssh.Signer{conn.ServerIdentity.KeySigner},
+		Cluster:      conn.ServerIdentity.Cert.Extensions[utils.CertExtensionAuthority],
+		KubeListener: listeners.kube,
 	})
 	if err != nil {
 		return trace.Wrap(err)
@@ -1839,7 +1840,7 @@ func warnOnErr(err error) {
 	if err != nil {
 		// don't warn on double close, happens sometimes when closing
 		// calling accept on a closed listener
-		if strings.Contains(err.Error(), "use of closed network connection") {
+		if strings.Contains(err.Error(), teleport.UseOfClosedNetworkConnection) {
 			return
 		}
 		log.Warningf("Got error while cleaning up: %v.", err)

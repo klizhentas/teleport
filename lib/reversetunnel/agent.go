@@ -82,6 +82,8 @@ type AgentConfig struct {
 	Clock clockwork.Clock
 	// EventsC is an optional events channel, used for testing purposes
 	EventsC chan string
+	// KubeListener is an optional kubernetes listener
+	KubeListener *utils.FanInListener
 }
 
 // CheckAndSetDefaults checks parameters and sets default values
@@ -341,7 +343,8 @@ func (a *Agent) proxyTransport(ch ssh.Channel, reqC <-chan *ssh.Request) {
 	// if the request is for the special string @remote-auth-server, then get the
 	// list of auth servers and return that. otherwise try and connect to the
 	// passed in server.
-	if server == RemoteAuthServer {
+	switch server {
+	case RemoteAuthServer:
 		authServers, err := a.Client.GetAuthServers()
 		if err != nil {
 			a.Warningf("Unable retrieve list of remote Auth Servers: %v.", err)
@@ -354,7 +357,32 @@ func (a *Agent) proxyTransport(ch ssh.Channel, reqC <-chan *ssh.Request) {
 		for _, as := range authServers {
 			servers = append(servers, as.GetAddr())
 		}
-	} else {
+	case RemoteKubeProxy:
+		// kubernetes is not configured, reject the connection
+		if a.KubeListener == nil {
+			req.Reply(false, []byte("connection rejected: configure kubernetes proxy for this cluster."))
+			return
+		}
+		chanConn := sshutils.NewChanConn(&utils.NetAddr{}, &utils.NetAddr{}, ch)
+		// push the connection to the kubernetes cluster
+		select {
+		case a.KubeListener.Channel() <- chanConn:
+		case <-a.KubeListener.Done():
+			req.Reply(false, []byte("connection rejected: proxy is shutting down."))
+			return
+		case <-a.ctx.Done():
+			req.Reply(false, []byte("connection rejected: proxy is shutting down."))
+			return
+		}
+		req.Reply(true, []byte("connected"))
+		a.Debugf("Successfully dialed to %v, start proxying.", server)
+		// now wait until the connection gets closed
+		select {
+		case <-chanConn.Done():
+			a.Debugf("Completed kubernetes out-of-band proxy transport request: %v", servers)
+			return
+		}
+	default:
 		servers = append(servers, server)
 	}
 
@@ -608,6 +636,11 @@ const (
 	chanDiscovery        = "teleport-discovery"
 )
 
-// RemoteAuthServer is a special non-resolvable address that indicates we want
-// a connection to the remote auth server.
-const RemoteAuthServer = "@remote-auth-server"
+const (
+	// RemoteAuthServer is a special non-resolvable address that indicates client
+	// requests  a connection to the remote auth server.
+	RemoteAuthServer = "@remote-auth-server"
+	// RemoteKubeProxy is a special non-resolvable address that indicates that clients
+	// requests a connection to the remote kubernetes proxy
+	RemoteKubeProxy = "@remote-kube-proxy"
+)

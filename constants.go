@@ -399,3 +399,9 @@ const (
 	// that limits certificate to be only used for kubernetes proxying
 	UsageKubeOnly = "usage:kube"
 )
+
+const (
+	// UseOfClosedNetworkConnection is a special string some parts of
+	// go standard lib are using that is the only way to identify some errors
+	UseOfClosedNetworkConnection = "use of closed network connection"
+)

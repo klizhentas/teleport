@@ -174,15 +174,14 @@ type cluster struct {
 	remoteAddr utils.NetAddr
 	reversetunnel.RemoteSite
 	targetAddr string
+	isLocal    bool
 }
 
 func (c *cluster) Dial(_, _ string) (net.Conn, error) {
-	conn, err := c.RemoteSite.Dial(
+	return c.RemoteSite.Dial(
 		&c.remoteAddr,
-		// TODO: (klizhentas) how to dial in case of remote cluster?
 		&utils.NetAddr{AddrNetwork: "tcp", Addr: c.targetAddr},
 		nil)
-	return conn, err
 }
 
 // handlerWithAuthFunc is http handler with passed auth context
@@ -267,6 +266,7 @@ func (f *Forwarder) setupContext(ctx auth.AuthContext, req *http.Request, isRemo
 		return nil, trace.Wrap(err)
 	}
 
+	var isRemoteCluster bool
 	targetCluster, err := f.Tunnel.GetSite(f.ClusterName)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -275,13 +275,14 @@ func (f *Forwarder) setupContext(ctx auth.AuthContext, req *http.Request, isRemo
 		if strings.HasSuffix(req.Host, remoteCluster.GetName()+".") {
 			f.Debugf("Going to proxy to cluster: %v based on matching host suffix %v.", remoteCluster.GetName(), req.Host)
 			targetCluster = remoteCluster
+			isRemoteCluster = remoteCluster.GetName() == f.ClusterName
 			break
 		}
 	}
 	if targetCluster.GetName() != f.ClusterName && isRemoteUser {
 		return nil, trace.AccessDenied("access denied: remote user can not access remote cluster")
 	}
-	return &authContext{
+	authCtx := &authContext{
 		sessionTTL:  sessionTTL,
 		AuthContext: ctx,
 		kubeGroups:  kubeGroups,
@@ -290,7 +291,11 @@ func (f *Forwarder) setupContext(ctx auth.AuthContext, req *http.Request, isRemo
 			RemoteSite: targetCluster,
 			targetAddr: f.TargetAddr,
 		},
-	}, nil
+	}
+	if isRemoteCluster {
+		authCtx.cluster.targetAddr = reversetunnel.RemoteKubeProxy
+	}
+	return authCtx, nil
 }
 
 // exec forwards all exec requests to the target server, captures
