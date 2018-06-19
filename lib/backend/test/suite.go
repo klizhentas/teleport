@@ -19,6 +19,7 @@ limitations under the License.
 package test
 
 import (
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -147,6 +148,7 @@ func (s *BackendSuite) CompareAndSwap(c *C) {
 
 // BatchCRUD tests batch CRUD operations if supported by the backend
 func (s *BackendSuite) BatchCRUD(c *C) {
+	fmt.Printf("--> BatchCRUD: s.B: %T\n", s.B)
 	getter, ok := s.B.(backend.ItemsGetter)
 	if !ok {
 		c.Skip("backend does not support batch get")
