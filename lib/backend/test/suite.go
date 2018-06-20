@@ -19,7 +19,6 @@ limitations under the License.
 package test
 
 import (
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -146,18 +145,12 @@ func (s *BackendSuite) CompareAndSwap(c *C) {
 	c.Assert(string(val), Equals, "2")
 }
 
-// BatchCRUD tests batch CRUD operations if supported by the backend
+// BatchCRUD tests batch CRUD operations.
 func (s *BackendSuite) BatchCRUD(c *C) {
-	fmt.Printf("--> BatchCRUD: s.B: %T\n", s.B)
-	getter, ok := s.B.(backend.ItemsGetter)
-	if !ok {
-		c.Skip("backend does not support batch get")
-		return
-	}
 	c.Assert(s.B.UpsertVal([]string{"a", "b"}, "bkey", []byte("val1"), 0), IsNil)
 	c.Assert(s.B.UpsertVal([]string{"a", "b"}, "akey", []byte("val2"), 0), IsNil)
 
-	items, err := getter.GetItems([]string{"a", "b"})
+	items, err := s.B.GetItems([]string{"a", "b"})
 	c.Assert(err, IsNil)
 	c.Assert(len(items), Equals, 2)
 	c.Assert(string(items[0].Value), Equals, "val2")

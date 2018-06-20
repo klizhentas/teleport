@@ -171,7 +171,7 @@ func (b *bk) GetKeys(path []string) ([]string, error) {
 	// Convert from []backend.Item to []string and return keys.
 	keys := make([]string, len(items))
 	for i, e := range items {
-		keys[i] = suffix(e.Key)
+		keys[i] = e.Key
 	}
 
 	return keys, nil
@@ -288,7 +288,7 @@ func (b *bk) getItems(path string) ([]backend.Item, error) {
 		}
 
 		vals = append(vals, backend.Item{
-			Key:   n.Key,
+			Key:   suffix(n.Key),
 			Value: valueBytes,
 		})
 	}
